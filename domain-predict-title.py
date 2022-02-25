@@ -38,10 +38,10 @@ LABEL_NAMES = ['scolomfr-voc-015-num-1179',
                'scolomfr-voc-015-num-6369',
                'scolomfr-voc-015-num-7816']
 
-MODEL_PATH = '/home/irpia/irpia_scripts/models/domains-predict/results/checkpoint-10000'
+MODEL_PATH = './models/checkpoint-10000'
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='Dummy Irpia module.')
+    parser = argparse.ArgumentParser(description='Irpia module for domain prediction from title.')
     parser.add_argument('--title', dest='title', default='',
                         help='Metadata title')
     parser.add_argument('--text', dest='text', default='',
