@@ -46,6 +46,8 @@ def parse_arguments():
                         help='Metadata title')
     parser.add_argument('--text', dest='text', default='',
                         help='Metadata text')
+    parser.add_argument('--url', dest='url', default='',
+                        help='Metadata url')
     return parser.parse_args()
 
 
