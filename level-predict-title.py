@@ -1,6 +1,6 @@
 import argparse
 import json
-from tasks import predict_domain
+from tasks import predict_level
 
 
 def parse_arguments():
@@ -22,7 +22,7 @@ def is_not_blank(s):
 if __name__ == '__main__':
     args = parse_arguments()
     if is_not_blank(args.title):
-        result = predict_domain.delay(title=args.title, description=args.text)
+        result = predict_level.delay(title=args.title, description=args.text)
         print(result.get(timeout=3))
     else:
-        print(json.dumps({'domain': []}))
+        print(json.dumps({'level': []}))
