@@ -1,4 +1,5 @@
 import json
+import os
 
 from celery import Celery
 from celery.signals import worker_process_init
@@ -6,6 +7,7 @@ from celery.signals import worker_process_init
 import numpy as np
 import torch
 from transformers import CamembertTokenizerFast, CamembertForSequenceClassification, Trainer
+
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels=None):
@@ -20,6 +22,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.encodings["input_ids"])
+
 
 from level_french_labels import level_french_labels
 
@@ -64,29 +67,31 @@ LEVEL_LABEL_NAMES = ['scolomfr-voc-022-num-004', 'scolomfr-voc-022-num-005', 'sc
                      'scolomfr-voc-022-num-109', 'scolomfr-voc-022-num-110', 'scolomfr-voc-022-num-163',
                      'scolomfr-voc-022-num-164', 'scolomfr-voc-022-num-063']
 
-
-levelid2label = {idx:label for idx, label in enumerate(LEVEL_LABEL_NAMES)}
-levellabel2id = {label:idx for idx, label in enumerate(LEVEL_LABEL_NAMES)}
+levelid2label = {idx: label for idx, label in enumerate(LEVEL_LABEL_NAMES)}
+levellabel2id = {label: idx for idx, label in enumerate(LEVEL_LABEL_NAMES)}
 
 DOMAINS_MODEL_PATH = './models/checkpoint-10000'
 LEVELS_MODEL_PATH = './models/checkpoint-39376'
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 app = Celery('tasks',
-             broker='redis://localhost:6379/0',
-             backend='rpc://')
+             broker=os.getenv("CELERY_BROCKER", "redis://redis-broker:6379/0"),
+             backend=os.getenv("CELERY_BACKEND", "redis://redis-broker:6379/1"))
 
 
 def initialization():
-    initialization.tokenizer = CamembertTokenizerFast.from_pretrained("camembert-base")
+    initialization.tokenizer = CamembertTokenizerFast.from_pretrained("camembert-base",
+                                                                      device=device)
 
     # Load trained model
     domains_model = CamembertForSequenceClassification.from_pretrained(DOMAINS_MODEL_PATH,
-                                                                       num_labels=len(DOMAIN_LABEL_NAMES))
+                                                                       num_labels=len(DOMAIN_LABEL_NAMES)).to(device)
     levels_model = CamembertForSequenceClassification.from_pretrained(LEVELS_MODEL_PATH,
                                                                       problem_type="multi_label_classification",
-                                                                      num_labels=len(LEVELS_MODEL_PATH),
+                                                                      num_labels=len(LEVEL_LABEL_NAMES),
                                                                       id2label=levelid2label,
-                                                                      label2id=levellabel2id)
+                                                                      label2id=levellabel2id).to(device)
     # Define test trainer
     initialization.domain_trainer = Trainer(domains_model)
     initialization.level_trainer = Trainer(levels_model)
@@ -101,27 +106,37 @@ def setup(**kwargs):
 
 @app.task
 def predict_domain(title, description):
-    tokenized_title = initialization.tokenizer([title],
-                                               padding=True, truncation=True)
-    dataset = Dataset(tokenized_title)
-    # Make prediction
-    raw_pred, a, b = initialization.domain_trainer.predict(dataset)
+    if is_not_blank(f"{title} {description}"):
+        tokenized_title = initialization.tokenizer([title],
+                                                   padding=True, truncation=True)
+        dataset = Dataset(tokenized_title)
+        # Make prediction
+        raw_pred, a, b = initialization.domain_trainer.predict(dataset)
 
-    # Translate raw predictions
-    pred = DOMAIN_LABEL_NAMES[np.argmax(raw_pred, axis=1)[0]]
+        # Translate raw predictions
+        pred = [DOMAIN_LABEL_NAMES[np.argmax(raw_pred, axis=1)[0]]]
+    else:
+        pred = []
+    return json.dumps({'domain': pred})
 
-    return json.dumps({'domain': [pred]})
+
+def is_not_blank(s):
+    return bool(s and not s.isspace())
+
 
 @app.task
 def predict_level(title, description):
-    tokenized_title = initialization.tokenizer([title],
-                                               padding=True, truncation=True, max_length=128)
-    dataset = Dataset(tokenized_title)
-    # Make prediction
-    raw_pred, a, b = initialization.level_trainer.predict(dataset)
+    if is_not_blank(f"{title} {description}"):
+        tokenized_title = initialization.tokenizer([title],
+                                                   padding=True, truncation=True, max_length=128)
+        dataset = Dataset(tokenized_title)
+        # Make prediction
+        raw_pred, a, b = initialization.level_trainer.predict(dataset)
 
-    # Translate raw predictions
-    preds = [LEVEL_LABEL_NAMES[int(index)] for index in list(np.where(raw_pred[0] > 0)[0])]
+        # Translate raw predictions
+        preds = [LEVEL_LABEL_NAMES[int(index)] for index in list(np.where(raw_pred[0] > 0)[0])]
+    else:
+        preds = []
 
     print([level_french_labels[f'http://data.education.fr/voc/scolomfr/concept/{pred}'] for pred in preds])
 
